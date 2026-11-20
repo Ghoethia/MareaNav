@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MareaNav — prototipo</title>
+  <style>
+    :root { --mar:#0b1f3a; --marea:#1a6b7a; --arena:#f3efe6; --ambar:#b86a1d; --linea:#d9d3c7; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family:"Segoe UI", Calibri, sans-serif; background:var(--arena); color:#1c2430; }
+    header { background:var(--mar); color:#fff; padding:16px 24px; }
+    header h1 { margin:0; font-size:24px; }
+    header p { margin:6px 0 0; color:#d5e4ea; max-width:820px; }
+    main { display:grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 420px); gap:16px; padding:16px; }
+    section { background:#fff; border:1px solid var(--linea); border-radius:12px; padding:14px; min-width:0; }
+    h2 { margin:0 0 8px; font-size:16px; }
+    label { font-size:13px; display:block; margin-bottom:4px; }
+    select, button { font:inherit; border-radius:8px; padding:8px 10px; }
+    select { width:100%; border:1px solid #b7b1a6; background:#fff; }
+    .botones { display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; }
+    button { background:var(--marea); color:#fff; border:0; cursor:pointer; white-space:normal; }
+    button.oscuro { background:var(--mar); }
+    button.claro { background:#fff; color:var(--mar); border:1px solid var(--mar); }
+    svg { width:100%; height:auto; background:#e7f2f4; border-radius:10px; }
+    table { width:100%; border-collapse:collapse; font-size:13px; }
+    th, td { text-align:left; padding:6px 4px; border-bottom:1px solid var(--linea); vertical-align:top; }
+    tr { cursor:pointer; }
+    tr.activa { background:#e5f3f1; }
+    #politica, #estado { font-size:14px; }
+    #bitacora { margin:8px 0 0; padding-left:18px; font-size:13px; }
+    .leyenda { display:flex; gap:12px; flex-wrap:wrap; font-size:12px; margin-top:8px; }
+    .punto { width:10px; height:10px; border-radius:50%; display:inline-block; margin-right:4px; }
+    @media (max-width: 1180px) { main { grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>MareaNav</h1>
+    <p>Terminal hipotético. La política de navegación cambia con la congestión de la arteria y con la marea. La bodega queda fuera del corredor de despacho.</p>
+  </header>
+  <main>
+    <section>
+      <h2>Plano operativo</h2>
+      <svg id="plano" viewBox="-40 -40 900 360" role="img" aria-label="Plano del terminal"></svg>
+      <div class="leyenda">
+        <span><i class="punto" style="background:#1a6b7a"></i>Ruta seleccionada</span>
+        <span><i class="punto" style="background:#b86a1d"></i>Canal de marea</span>
+        <span><i class="punto" style="background:#8aa0ad"></i>Bodega no transitable</span>
+      </div>
+      <p id="estado">Elija un escenario y compare las estrategias.</p>
+    </section>
+    <section>
+      <h2>Despacho</h2>
+      <label for="escenario">Escenario operativo</label>
+      <select id="escenario"></select>
+      <div class="botones">
+        <button id="comparar" type="button">Comparar estrategias</button>
+        <button id="despachar" class="oscuro" type="button">Despachar con la política</button>
+        <button id="deshacer" class="claro" type="button">Deshacer último plan</button>
+      </div>
+      <p id="politica"></p>
+      <table>
+        <thead>
+          <tr><th>Estrategia</th><th>Tiempo real</th><th>Metros</th><th>Expandidos</th></tr>
+        </thead>
+        <tbody id="tabla"></tbody>
+      </table>
+      <h2 style="margin-top:14px">Bitácora de comandos</h2>
+      <ul id="bitacora"><li>Sin despachos.</li></ul>
+    </section>
+  </main>
+  <script>
+    const plano = document.getElementById("plano");
+    const tabla = document.getElementById("tabla");
+    const estado = document.getElementById("estado");
+    const politica = document.getElementById("politica");
+    const bitacora = document.getElementById("bitacora");
+    let actual = null;
+    let seleccion = 0;
+
+    function minutos(segundos) {
+      const total = Math.round(segundos);
+      const min = Math.floor(total / 60);
+      const seg = total % 60;
+      return min + " min " + String(seg).padStart(2, "0") + " s";
+    }
+
+    function nodo(id) {
+      return actual.topologia.nodos.find((item) => item.id === id);
+    }
+
+    function sx(x) { return 20 + (x / 760) * 820; }
+    function sy(y) { return 300 - (y / 280) * 250; }
+
+    function pintar(camino) {
+      if (!actual) return;
+      plano.replaceChildren();
+      const marcas = new Set();
+      if (camino) {
+        for (let i = 0; i < camino.length - 1; i += 1) {
+          marcas.add(camino[i] + ">" + camino[i + 1]);
+        }
+      }
+      const bodega = new Set(
+        (actual.topologia.zonas.find((zona) => zona.nombre === "Bodega") || { nodos: [] }).nodos
+      );
+      for (const arista of actual.topologia.aristas) {
+        const a = nodo(arista.origen);
+        const b = nodo(arista.destino);
+        const linea = document.createElementNS("http://www.w3.org/2000/svg", "line");
+        linea.setAttribute("x1", sx(a.x));
+        linea.setAttribute("y1", sy(a.y));
+        linea.setAttribute("x2", sx(b.x));
+        linea.setAttribute("y2", sy(b.y));
+        const usada = marcas.has(arista.origen + ">" + arista.destino) || marcas.has(arista.destino + ">" + arista.origen);
+        const esBodega = bodega.has(arista.origen) && bodega.has(arista.destino);
+        linea.setAttribute("stroke", usada ? "#1a6b7a" : arista.requiere_marea_alta ? "#b86a1d" : esBodega ? "#c5ced4" : "#8aa0ad");
+        linea.setAttribute("stroke-width", usada ? "5" : "2");
+        if (arista.requiere_marea_alta && !usada) linea.setAttribute("stroke-dasharray", "6 4");
+        plano.appendChild(linea);
+      }
+      for (const punto of actual.topologia.nodos) {
+        const enRuta = camino && camino.includes(punto.id);
+        const circulo = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+        circulo.setAttribute("cx", sx(punto.x));
+        circulo.setAttribute("cy", sy(punto.y));
+        circulo.setAttribute("r", enRuta ? "6" : "4");
+        circulo.setAttribute("fill", bodega.has(punto.id) ? "#d5dde2" : enRuta ? "#0b1f3a" : "#f7f4ee");
+        circulo.setAttribute("stroke", "#0b1f3a");
+        plano.appendChild(circulo);
+        if (punto.zona === "Bodega" && punto.id !== "B1") continue;
+        const texto = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        if (punto.id === "MU") {
+          texto.setAttribute("x", sx(punto.x) - 10);
+          texto.setAttribute("y", sy(punto.y) - 16);
+          texto.setAttribute("text-anchor", "end");
+        } else {
+          texto.setAttribute("x", sx(punto.x) + 8);
+          texto.setAttribute("y", sy(punto.y) - 8);
+        }
+        texto.setAttribute("font-size", "11");
+        texto.setAttribute("fill", "#0b1f3a");
+        texto.textContent = punto.nombre;
+        plano.appendChild(texto);
+      }
+    }
+
+    function mostrar(filas) {
+      tabla.replaceChildren();
+      filas.forEach((fila, indice) => {
+        const tr = document.createElement("tr");
+        if (indice === seleccion) tr.className = "activa";
+        tr.addEventListener("click", () => {
+          seleccion = indice;
+          mostrar(filas);
+          pintar(fila.camino);
+          estado.textContent = fila.itinerario.join(" → ");
+        });
+        [fila.estrategia, minutos(fila.costo_real_s), Math.round(fila.distancia_m) + " m", fila.nodos_expandidos]
+          .forEach((valor) => {
+            const td = document.createElement("td");
+            td.textContent = valor;
+            tr.appendChild(td);
+          });
+        tabla.appendChild(tr);
+      });
+    }
+
+    function pintarBitacora(registros) {
+      bitacora.replaceChildren();
+      if (!registros || !registros.length) {
+        const item = document.createElement("li");
+        item.textContent = "Sin despachos.";
+        bitacora.appendChild(item);
+        return;
+      }
+      registros.forEach((registro, indice) => {
+        const item = document.createElement("li");
+        item.textContent = (indice + 1) + ". " + registro.estrategia + " · " + registro.origen + " → " + registro.destino;
+        bitacora.appendChild(item);
+      });
+    }
+
+    async function comparar() {
+      const respuesta = await fetch("/api/comparar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: document.getElementById("escenario").value })
+      });
+      actual = await respuesta.json();
+      if (!respuesta.ok) {
+        estado.textContent = actual.error || "No fue posible comparar.";
+        return;
+      }
+      seleccion = actual.resultados.findIndex((fila) => fila.estrategia === actual.politica.estrategia);
+      if (seleccion < 0) seleccion = 0;
+      mostrar(actual.resultados);
+      pintar(actual.resultados[seleccion].camino);
+      politica.textContent = "Política activa: " + actual.politica.estrategia + ". " + actual.politica.motivo;
+      estado.textContent = actual.resultados[seleccion].itinerario.join(" → ");
+    }
+
+    async function despachar() {
+      const respuesta = await fetch("/api/calcular", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: document.getElementById("escenario").value })
+      });
+      const datos = await respuesta.json();
+      if (!respuesta.ok) {
+        estado.textContent = datos.error || "No fue posible despachar.";
+        return;
+      }
+      estado.textContent = "Plan despachado: " + datos.itinerario.join(" → ");
+      politica.textContent = "Política activa: " + datos.politica.estrategia + ". " + datos.politica.motivo;
+      pintarBitacora(datos.bitacora);
+      if (actual) pintar(datos.plan.camino);
+    }
+
+    async function deshacer() {
+      const respuesta = await fetch("/api/deshacer", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+      const datos = await respuesta.json();
+      if (!respuesta.ok) {
+        estado.textContent = datos.mensaje || datos.error || "No hay plan para deshacer.";
+        return;
+      }
+      estado.textContent = datos.plan ? "Plan vigente restaurado: " + datos.itinerario.join(" → ") : "No queda un plan vigente.";
+      pintarBitacora(datos.bitacora);
+      if (actual && datos.plan) pintar(datos.plan.camino);
+    }
+
+    document.getElementById("comparar").addEventListener("click", comparar);
+    document.getElementById("despachar").addEventListener("click", despachar);
+    document.getElementById("deshacer").addEventListener("click", deshacer);
+
+    fetch("/api/escenarios")
+      .then((respuesta) => respuesta.json())
+      .then((datos) => {
+        const select = document.getElementById("escenario");
+        datos.escenarios.forEach((escenario) => {
+          const opcion = document.createElement("option");
+          opcion.value = escenario.id;
+          opcion.textContent = escenario.titulo;
+          select.appendChild(opcion);
+        });
+        select.value = "congestion";
+        return comparar();
+      })
+      .catch(() => { estado.textContent = "El servidor del prototipo no respondió."; });
+  </script>
+</body>
+</html>
